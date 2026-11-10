@@ -93,12 +93,32 @@ def binary_label(v: pd.Series) -> np.ndarray:
     return (~s.isin(["normal", "0", "honest", "benign", "no", "false"])).astype(np.int8).to_numpy()
 
 
-def daily_blocks(df, elec, typ, label, theft_type=None):
+def label_runs_report(df, typ, label):
+    """How the hourly labels are laid out: length of each contiguous run of one label value
+    within a consumer type, and where runs start relative to a 24-hour grid."""
+    rows = []
+    for _, d in df.groupby(typ, sort=False):
+        v = d[label].astype(str).to_numpy()
+        change = np.r_[True, v[1:] != v[:-1]]
+        starts = np.flatnonzero(change)
+        lengths = np.diff(np.r_[starts, len(v)])
+        rows.append(pd.DataFrame({"value": v[starts], "start": starts, "length": lengths}))
+    r = pd.concat(rows)
+    th = r[r.value.str.lower() != "normal"]
+    rep = {"theft_runs": len(th),
+           "run_length_quantiles_h": th.length.quantile([0, .1, .5, .9, 1]).round(1).tolist(),
+           "share_runs_multiple_of_24h": round(float((th.length % HOURS == 0).mean()), 4),
+           "share_runs_starting_at_midnight": round(float((th.start % HOURS == 0).mean()), 4)}
+    return rep
+
+
+def daily_blocks(df, elec, typ, label, theft_type=None, day_label="pure"):
     """Cut each consumer type's rows (in file order) into consecutive 24-hour blocks.
 
+    day_label = "pure": keep only blocks whose 24 hourly labels are identical (default);
+                "any" : a day is a theft day if ANY of its hours is labelled as theft; its theft
+                        type is the most frequent theft type among those hours.
     Returns series [n_days, 24], y [n_days], groups [n_days], theft [n_days], report dict.
-    Blocks whose hourly labels are not constant are dropped and counted (this also tells us
-    whether the 24-hour alignment is right: with a wrong offset most theft blocks are mixed).
     """
     X, Y, G, T = [], [], [], []
     n_mixed = n_tail = 0
@@ -112,14 +132,35 @@ def daily_blocks(df, elec, typ, label, theft_type=None):
             tt[: n * HOURS].reshape(n, HOURS)
         const = (yb == yb[:, :1]).all(axis=1) & (tt == tt[:, :1]).all(axis=1)
         n_mixed += int((~const).sum())
-        X.append(e[const]); Y.append(yb[const, 0]); G.append(np.full(const.sum(), str(g), object))
-        T.append(tt[const, 0])
-    rep = {"days": int(sum(len(y) for y in Y)), "mixed_blocks_dropped": n_mixed,
-           "tail_hours_dropped": n_tail}
+        if day_label == "pure":
+            keep = const
+            yd, td = yb[:, 0], tt[:, 0]
+        elif day_label == "any":
+            keep = np.ones(n, bool)
+            yd = yb.max(axis=1)
+            td = np.array([pd.Series(r[yr == 1]).mode().iloc[0] if yr.any() else r[0]
+                           for r, yr in zip(tt, yb)], dtype=object)
+        else:
+            raise ValueError(day_label)
+        X.append(e[keep]); Y.append(yd[keep]); G.append(np.full(keep.sum(), str(g), object))
+        T.append(td[keep])
+    rep = {"days": int(sum(len(y) for y in Y)), "mixed_blocks": n_mixed,
+           "mixed_blocks_dropped": n_mixed if day_label == "pure" else 0,
+           "tail_hours_dropped": n_tail, "day_label": day_label}
     return np.vstack(X), np.concatenate(Y), np.concatenate(G), np.concatenate(T), rep
 
 
-def prepare_and_cache(path, cols: dict, group_by: str = "type") -> None:
+def drop_invalid_types(df, typ, min_rows=HOURS * 30):
+    """Remove rows whose consumer type occurs fewer than min_rows times (spurious rows)."""
+    counts = df[typ].value_counts()
+    bad = counts[counts < min_rows]
+    if len(bad):
+        print(f"[tdd] dropping {int(bad.sum())} rows with spurious '{typ}' values: {bad.to_dict()}")
+        df = df[~df[typ].isin(bad.index)]
+    return df
+
+
+def prepare_and_cache(path, cols: dict, group_by: str = "type", day_label: str = "pure") -> None:
     if config.DATASET != "tdd2022":
         raise RuntimeError("set QMLETD_DATASET=tdd2022 before preparing TDD2022")
     config.ensure_dirs()
@@ -132,15 +173,17 @@ def prepare_and_cache(path, cols: dict, group_by: str = "type") -> None:
         raise SystemExit(f"could not detect columns {missing}; run with --inspect and pass them "
                          f"explicitly. Columns: {list(df.columns)}")
     print(f"[tdd] columns: {det}")
+    df = drop_invalid_types(df, det["type"])
+    print(f"[tdd] label layout: {label_runs_report(df, det['type'], det['label'])}")
     X, y, groups, theft, rep = daily_blocks(df, det["elec"], det["type"], det["label"],
-                                            det["theft_type"])
+                                            det["theft_type"], day_label=day_label)
     mask = np.isnan(X)
     filled, _ = data.interpolate_series(X)
     print(f"[tdd] {rep}; consumer types={len(set(groups))}; positives={y.mean():.4f}; "
           f"missing={mask.mean():.4%}")
-    if rep["mixed_blocks_dropped"] > 0.02 * rep["days"]:
-        print("[tdd] WARNING: >2% of 24-hour blocks have mixed labels: the rows may not be ordered "
-              "by time within each consumer type, or days do not start at row 0. Check --inspect.")
+    if rep["mixed_blocks"] > 0.02 * rep["days"]:
+        print(f"[tdd] NOTE: {rep['mixed_blocks']} 24-hour blocks mix normal and theft hours "
+              f"(day_label={day_label}).")
     feats = data.engineer_features(filled, mask)
     feats.insert(0, "customer_id", [f"{g}#{i}" for i, g in enumerate(groups)])
     feats["label"] = y
