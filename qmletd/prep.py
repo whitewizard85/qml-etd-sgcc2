@@ -26,13 +26,72 @@ class SplitIdx:
     test: np.ndarray
 
 
-def make_split(y: np.ndarray, seed: int) -> SplitIdx:
+def _load_groups(n):
+    """Groups that must never be split across partitions (e.g. TDD2022 consumer types)."""
+    if not config.GROUPS_FILE.exists():
+        return None
+    g = np.load(config.GROUPS_FILE, allow_pickle=True)
+    if len(g) != n:
+        raise RuntimeError(f"groups file has {len(g)} rows, labels have {n}")
+    return g
+
+
+def _strat_split(idx, y, frac, seed, groups):
+    """Split idx into (rest, part) with |part| ~ frac*|idx|, stratified on y.
+
+    Without groups: sklearn train_test_split. With groups: StratifiedGroupKFold with
+    round(1/frac) folds, first fold taken as `part` (whole groups only)."""
+    if groups is None:
+        rest, part = train_test_split(idx, test_size=frac, stratify=y[idx], random_state=seed)
+        return np.sort(rest), np.sort(part)
+    from sklearn.model_selection import StratifiedGroupKFold
+    k = max(2, int(round(1 / frac)))
+    cv = StratifiedGroupKFold(n_splits=k, shuffle=True, random_state=seed % (2**32 - 1))
+    rest, part = next(cv.split(idx, y[idx], groups[idx]))
+    return np.sort(idx[rest]), np.sort(idx[part])
+
+
+def holdout_test(y, groups=None):
+    """The fixed, untouched test set of the hold-out protocol (same for every model/run)."""
     idx = np.arange(len(y))
-    f_tr, f_va, f_te = config.SPLIT_FRACTIONS
-    tr, tmp = train_test_split(idx, test_size=f_va + f_te, stratify=y, random_state=seed)
-    va, te = train_test_split(tmp, test_size=f_te / (f_va + f_te), stratify=y[tmp],
-                              random_state=seed + 10_000)
-    return SplitIdx(np.sort(tr), np.sort(va), np.sort(te))
+    return _strat_split(idx, y, config.HOLDOUT_TEST_FRACTION, config.HOLDOUT_SEED, groups)
+
+
+def make_split(y: np.ndarray, seed: int, groups=None) -> SplitIdx:
+    """Train/val/test indices for 'split' `seed` under the active protocol.
+
+    splits : repeated stratified 60/20/20 split with seed `seed` (original protocol).
+    holdout: test = fixed hold-out set (independent of `seed`); the remaining data are cut
+             into HOLDOUT_FOLDS stratified folds (fixed seed) and fold `seed` is the
+             validation set. Hyperparameters and thresholds therefore never see the test set.
+    If a groups file exists, whole groups are kept together in every partition.
+    """
+    if groups is None:
+        groups = _load_groups(len(y))
+    idx = np.arange(len(y))
+    if config.PROTOCOL == "splits":
+        f_tr, f_va, f_te = config.SPLIT_FRACTIONS
+        if groups is None:      # exactly the original code: results stay paired with old runs
+            tr, tmp = train_test_split(idx, test_size=f_va + f_te, stratify=y, random_state=seed)
+            va, te = train_test_split(tmp, test_size=f_te / (f_va + f_te), stratify=y[tmp],
+                                      random_state=seed + 10_000)
+            return SplitIdx(np.sort(tr), np.sort(va), np.sort(te))
+        tr, tmp = _strat_split(idx, y, f_va + f_te, seed, groups)
+        va, te = _strat_split(tmp, y, f_te / (f_va + f_te), seed + 10_000, groups)
+        return SplitIdx(tr, va, te)
+    if not 0 <= seed < config.HOLDOUT_FOLDS:
+        raise ValueError(f"hold-out protocol: split must be in 0..{config.HOLDOUT_FOLDS - 1}, got {seed}")
+    dev, te = holdout_test(y, groups)
+    if groups is None:
+        from sklearn.model_selection import StratifiedKFold
+        cv = StratifiedKFold(config.HOLDOUT_FOLDS, shuffle=True, random_state=config.HOLDOUT_SEED + 1)
+        folds = list(cv.split(dev, y[dev]))
+    else:
+        from sklearn.model_selection import StratifiedGroupKFold
+        cv = StratifiedGroupKFold(config.HOLDOUT_FOLDS, shuffle=True, random_state=config.HOLDOUT_SEED + 1)
+        folds = list(cv.split(dev, y[dev], groups[dev]))
+    tr, va = folds[seed]
+    return SplitIdx(np.sort(dev[tr]), np.sort(dev[va]), te)
 
 
 def mi_ranking(X_tr: np.ndarray, y_tr: np.ndarray, seed: int) -> np.ndarray:
@@ -47,9 +106,11 @@ def balance(X: np.ndarray, y: np.ndarray, seed: int, mode: str = "rus_smote"):
     if mode == "rus":
         return RandomUnderSampler(sampling_strategy=1.0, random_state=seed).fit_resample(X, y)
     if mode == "rus_smote":
-        Xr, yr = RandomUnderSampler(sampling_strategy=config.RUS_RATIO,
-                                    random_state=seed).fit_resample(X, y)
-        return SMOTE(sampling_strategy=1.0, random_state=seed).fit_resample(Xr, yr)
+        n1, n0 = int((y == 1).sum()), int((y == 0).sum())
+        if min(n1, n0) / max(n1, n0) < config.RUS_RATIO:    # only if more imbalanced than RUS_RATIO
+            X, y = RandomUnderSampler(sampling_strategy=config.RUS_RATIO,
+                                      random_state=seed).fit_resample(X, y)
+        return SMOTE(sampling_strategy=1.0, random_state=seed).fit_resample(X, y)
     raise ValueError(mode)
 
 

@@ -122,3 +122,126 @@ def noninferiority_upper(a, b, margin):
     if se == 0:
         return 0.0 if d.mean() < margin else 1.0
     return float(stats.t.cdf((d.mean() - margin) / se, n - 1))
+
+
+# ----------------------------------------------------------------------------------------
+# Inference that accounts for the overlap between repeated random splits.
+# With repeated hold-out the J per-split differences are positively correlated (training and
+# test sets overlap), so the naive paired t-test underestimates the variance. Nadeau & Bengio
+# (2003) replace Var/J by Var * (1/J + n_test/n_train). This "corrected resampled t-test" is
+# conservative under the usual assumptions and is the standard fix for this design.
+
+def corrected_resampled_ttest(a, b, test_train_ratio):
+    """Two-sided corrected resampled t-test of mean(a - b) = 0.
+
+    Returns (mean_diff, p_value, (ci95_lo, ci95_hi)).
+    """
+    d = np.asarray(a, float) - np.asarray(b, float)
+    d = d[~np.isnan(d)]
+    J = len(d)
+    if J < 2:
+        return float("nan"), float("nan"), (float("nan"), float("nan"))
+    m = d.mean()
+    var = d.var(ddof=1)
+    se = np.sqrt(var * (1.0 / J + test_train_ratio))
+    if se == 0:
+        return float(m), (1.0 if m == 0 else 0.0), (float(m), float(m))
+    t = m / se
+    p = 2 * stats.t.sf(abs(t), J - 1)
+    h = stats.t.ppf(0.975, J - 1) * se
+    return float(m), float(p), (float(m - h), float(m + h))
+
+
+def corrected_tost(a, b, margin, test_train_ratio):
+    """Equivalence within +-margin with the Nadeau-Bengio variance. Returns (p_tost, ci90)."""
+    d = np.asarray(a, float) - np.asarray(b, float)
+    d = d[~np.isnan(d)]
+    J = len(d)
+    if J < 2:
+        return float("nan"), (float("nan"), float("nan"))
+    m = d.mean()
+    se = np.sqrt(d.var(ddof=1) * (1.0 / J + test_train_ratio))
+    if se == 0:
+        return (0.0 if abs(m) < margin else 1.0), (float(m), float(m))
+    p_low = stats.t.sf((m + margin) / se, J - 1)
+    p_up = stats.t.cdf((m - margin) / se, J - 1)
+    h = stats.t.ppf(0.95, J - 1) * se
+    return float(max(p_low, p_up)), (float(m - h), float(m + h))
+
+
+# ----------------------------------------------------------------------------------------
+# Inference on ONE fixed, untouched test set (hold-out protocol). The unit of resampling is
+# the test customer; both models are scored on the same customers, so the bootstrap is paired.
+
+def bootstrap_diff(y, s1, s2, metric="pr_auc", n_boot=10_000, seed=0):
+    """Stratified paired bootstrap of metric(s1) - metric(s2) on a single test set.
+
+    Returns dict: diff, ci95, ci90 (percentile), p (two-sided, from the bootstrap distribution
+    shifted to the null), se.
+    """
+    f = average_precision_score if metric == "pr_auc" else roc_auc_score
+    y = np.asarray(y).astype(int)
+    s1, s2 = np.asarray(s1, float), np.asarray(s2, float)
+    rng = np.random.default_rng(seed)
+    pos, neg = np.flatnonzero(y == 1), np.flatnonzero(y == 0)
+    diffs = np.empty(n_boot)
+    for b in range(n_boot):
+        idx = np.r_[rng.choice(pos, len(pos)), rng.choice(neg, len(neg))]
+        diffs[b] = f(y[idx], s1[idx]) - f(y[idx], s2[idx])
+    obs = f(y, s1) - f(y, s2)
+    centred = diffs - diffs.mean()
+    p = float((np.sum(np.abs(centred) >= abs(obs)) + 1) / (n_boot + 1))
+    return {"diff": float(obs), "se": float(diffs.std(ddof=1)), "p": p,
+            "ci95": (float(np.percentile(diffs, 2.5)), float(np.percentile(diffs, 97.5))),
+            "ci90": (float(np.percentile(diffs, 5)), float(np.percentile(diffs, 95)))}
+
+
+def verdict(p_adj, diff, ci90, margin, alpha=0.05):
+    """Q>C / Q<C if the (adjusted) difference test rejects; 'equivalent' if the 90% CI lies in
+    (-margin, +margin) (TOST at level 0.05); otherwise 'inconclusive'."""
+    if p_adj < alpha:
+        return "Q>C" if diff > 0 else "Q<C"
+    if -margin < ci90[0] and ci90[1] < margin:
+        return "equivalent"
+    return "inconclusive"
+
+
+def _weighted_ap(y, s, W):
+    """Average precision (sklearn definition) for each row of the weight matrix W [B, n].
+
+    Ties in s are grouped as in sklearn. Used for fast bootstrap: W holds resampling counts."""
+    order = np.argsort(-s, kind="stable")
+    s_o, y_o = s[order], y[order].astype(float)
+    W = W[:, order].astype(float)
+    last = np.r_[s_o[1:] != s_o[:-1], True]              # last index of each distinct score
+    tp = np.cumsum(W * y_o, axis=1)[:, last]
+    fp = np.cumsum(W * (1 - y_o), axis=1)[:, last]
+    P = tp[:, -1:]
+    prec = np.divide(tp, tp + fp, out=np.zeros_like(tp), where=(tp + fp) > 0)
+    rec = np.divide(tp, P, out=np.zeros_like(tp), where=P > 0)
+    drec = np.diff(np.concatenate([np.zeros((W.shape[0], 1)), rec], axis=1), axis=1)
+    return (drec * prec).sum(axis=1)
+
+
+def bootstrap_diff_fast(y, s1, s2, n_boot=10_000, seed=0, chunk=500):
+    """Same as bootstrap_diff for PR-AUC, vectorised (resampling counts as weights)."""
+    y = np.asarray(y).astype(int)
+    s1, s2 = np.asarray(s1, float), np.asarray(s2, float)
+    rng = np.random.default_rng(seed)
+    pos, neg = np.flatnonzero(y == 1), np.flatnonzero(y == 0)
+    diffs = []
+    done = 0
+    while done < n_boot:
+        b = min(chunk, n_boot - done)
+        W = np.zeros((b, len(y)), dtype=np.int32)
+        W[:, pos] = rng.multinomial(len(pos), np.full(len(pos), 1 / len(pos)), size=b)
+        W[:, neg] = rng.multinomial(len(neg), np.full(len(neg), 1 / len(neg)), size=b)
+        diffs.append(_weighted_ap(y, s1, W) - _weighted_ap(y, s2, W))
+        done += b
+    diffs = np.concatenate(diffs)
+    obs = float(average_precision_score(y, s1) - average_precision_score(y, s2))
+    centred = diffs - diffs.mean()
+    p = float((np.sum(np.abs(centred) >= abs(obs)) + 1) / (n_boot + 1))
+    return {"diff": obs, "se": float(diffs.std(ddof=1)), "p": p,
+            "ci95": (float(np.percentile(diffs, 2.5)), float(np.percentile(diffs, 97.5))),
+            "ci90": (float(np.percentile(diffs, 5)), float(np.percentile(diffs, 95)))}

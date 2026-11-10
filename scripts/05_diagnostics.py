@@ -21,7 +21,7 @@ import numpy as np
 from sklearn.metrics.pairwise import rbf_kernel
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qmletd import common, prep, store  # noqa: E402
+from qmletd import common, config, prep, store  # noqa: E402
 from qmletd.config import get_device  # noqa: E402
 from qmletd.kernels import (centered_kta, fidelity_gram, geometric_difference,  # noqa: E402
                             offdiag_mean, offdiag_variance, projected_features, projected_gram,
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     ap.add_argument("--reps", type=int, default=2)
     ap.add_argument("--regs", type=float, nargs="+", default=[1e-3, 1e-1])
     a = ap.parse_args()
-    if a.splits == list(range(10)):
+    if a.splits is config.DEFAULT_SPLITS:   # not given on the command line
         a.splits = [0]
     device = get_device(a.device)
     cache = common.DataCache()

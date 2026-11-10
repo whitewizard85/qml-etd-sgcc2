@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qmletd import common, metrics, prep, store  # noqa: E402
+from qmletd import common, config, metrics, prep, store  # noqa: E402
 from qmletd.config import get_device  # noqa: E402
 from qmletd.shots import train_vqc_shots  # noqa: E402
 from qmletd.vqc import predict  # noqa: E402
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     ap.add_argument("--train-max", type=int, default=4000)
     ap.add_argument("--chunk", type=int, default=4096, help="rows per simulator call (lower if GPU OOM)")
     a = ap.parse_args()
-    if a.splits == list(range(10)):
+    if a.splits is config.DEFAULT_SPLITS:   # not given on the command line
         a.splits = [0, 1, 2]
     device = get_device(a.device)
     cache = common.DataCache()

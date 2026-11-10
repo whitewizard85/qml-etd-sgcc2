@@ -19,8 +19,10 @@ TOST equivalence tests, DeLong tests and paired bootstrap.
 | `qmletd/shots.py` | VQC training with finite-shot parameter-shift gradients |
 | `qmletd/qubo_svm.py` | QUBO-SVM (Willsch et al. 2020) with bagging, seeded simulated annealing, matched exact-SVM control |
 | `qmletd/baselines.py` | Logistic regression, SVM, random forest, LightGBM, MLP, 1D CNN on raw series |
-| `qmletd/prep.py`, `metrics.py`, `stats.py` | Splits and preprocessing, exact F2 threshold search, statistical tests |
+| `qmletd/prep.py`, `metrics.py`, `stats.py` | Splits (repeated or hold-out, optionally grouped), exact F2 threshold search, statistical tests (incl. Nadeau-Bengio corrected resampled t-test, paired bootstrap on a fixed test set) |
+| `qmletd/tdd.py` | TDD2022 loader: hourly rows to daily 24-hour series, consumer-type groups |
 | `scripts/00`–`11` | One script per experiment (see `reproduce_paper.sh`) |
+| `scripts/00b`, `12`–`14` | TDD2022 preparation, dependence-aware statistics, hold-out evaluation, finite-shot statistics (see `run_revision.sh`) |
 | `tests/` | Unit tests: simulator vs Qiskit (1e-10), parameter shift vs autograd, QUBO vs SVM dual, metrics |
 
 ## Installation
@@ -62,6 +64,29 @@ paired tests, figures). `scripts/11_paper_assets.py` writes the LaTeX tables and
 
 Wall-clock times on 32 vCPUs + NVIDIA RTX 5000 Ada: classical baselines 27 min, CNN 3.5 min, kernels (first grid)
 34 min, VQC 2 h 40 min, QUBO-SVM 3 h 37 min, diagnostics 25 min, finite-shot VQC about 5 min per run at 13 qubits.
+
+## Hold-out protocol and second dataset
+
+Two environment variables select the dataset and the evaluation protocol; every experiment script runs unchanged:
+
+| Variable | Values | Effect |
+|---|---|---|
+| `QMLETD_DATASET` | `sgcc` (default), `tdd2022` | processed data in `data/processed/` or `data/processed/tdd2022/` |
+| `QMLETD_PROTOCOL` | `splits` (default), `holdout` | 10 repeated 60/20/20 splits, or one fixed untouched 20% test set with 5 inner folds (`--splits 0..4`) |
+
+Results go to `results/` (SGCC, splits) or `results_<dataset>_<protocol>/`. Under `holdout`, each fold model tunes
+hyperparameters and the F2 threshold on its own validation fold; `scripts/13_holdout_eval.py` averages the fold models
+(scores standardised with validation statistics only) and compares models on the same test units with a stratified
+paired bootstrap, with Holm correction over a pre-specified primary family.
+
+TDD2022 (Zidi et al. 2023, Mendeley Data, doi:10.17632/c3c7329tjj, CC BY 4.0): download all files from the Mendeley page,
+put them in `data/raw/tdd2022/` (unzipped), then `QMLETD_DATASET=tdd2022 python scripts/00b_prepare_tdd2022.py --inspect`.
+The unit is one day (24 hourly readings of the electricity channel); thefts are synthetic. Whole consumer types are kept
+in one partition, so no test day is a transformation of a training day of the same consumer type.
+
+```bash
+./run_revision.sh           # robust statistics, 10-split finite-shot, SGCC hold-out, TDD2022 hold-out, evaluation
+```
 
 ## Notes and limitations
 
