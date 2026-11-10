@@ -1,0 +1,12 @@
+.venv/
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+results/*
+!results/.gitkeep
+paper/
+__pycache__/
+.pytest_cache/
+*.log
+*.tgz

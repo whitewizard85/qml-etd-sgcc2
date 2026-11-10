@@ -1,0 +1,20 @@
+# Tested (smoke test on synthetic data) with these versions, Python 3.13.
+# For CUDA, install torch first following https://pytorch.org (pick your CUDA version),
+# then `pip install -r requirements.txt`.
+numpy>=2.2
+scipy>=1.14
+pandas>=2.2
+pyarrow>=17
+scikit-learn>=1.6
+imbalanced-learn>=0.13
+lightgbm>=4.5
+torch>=2.5
+matplotlib>=3.9
+qiskit>=2.0
+qiskit-aer>=0.17
+qiskit-ibm-runtime>=0.40
+dimod>=0.12.18
+dwave-samplers>=1.4
+pytest>=8
+# optional, only for scripts/07_dwave_qmsvm.py (real D-Wave QPU):
+# dwave-system

@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the article below."
+title: "QML for electricity-theft detection under matched evaluation (code)"
+authors:
+  - family-names: Grimaldi
+    given-names: Giancarlo
+    affiliation: "University of Campania Luigi Vanvitelli"
+  - family-names: Esposito
+    given-names: Antonio
+    affiliation: "University of Campania Luigi Vanvitelli"
+    email: antonio.esposito@unicampania.it
+license: MIT
+preferred-citation:
+  type: article
+  title: "Quantum machine learning for electricity-theft detection under matched evaluation: kernel concentration, readout light cones and finite-shot training"
+  authors:
+    - family-names: Grimaldi
+      given-names: Giancarlo
+    - family-names: Esposito
+      given-names: Antonio
+  journal: "Quantum Machine Intelligence"
+  status: submitted
+  year: 2026
