@@ -47,7 +47,7 @@ if has sgcc_hold; then
   ( export QMLETD_DATASET=sgcc QMLETD_PROTOCOL=holdout; campaign )
 fi
 if has tdd_prep; then
-  ( export QMLETD_DATASET=tdd2022; py scripts/00b_prepare_tdd2022.py )
+  ( export QMLETD_DATASET=tdd2022; py scripts/00b_prepare_tdd2022.py --day-label any )
 fi
 if has tdd_hold; then
   ( export QMLETD_DATASET=tdd2022 QMLETD_PROTOCOL=holdout; campaign )
