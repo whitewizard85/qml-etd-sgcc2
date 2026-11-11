@@ -223,7 +223,7 @@ def _weighted_ap(y, s, W):
     return (drec * prec).sum(axis=1)
 
 
-def bootstrap_diff_fast(y, s1, s2, n_boot=10_000, seed=0, chunk=500):
+def bootstrap_diff_fast(y, s1, s2, n_boot=10_000, seed=0, chunk=500, margin=0.02):
     """Same as bootstrap_diff for PR-AUC, vectorised (resampling counts as weights)."""
     y = np.asarray(y).astype(int)
     s1, s2 = np.asarray(s1, float), np.asarray(s2, float)
@@ -242,6 +242,24 @@ def bootstrap_diff_fast(y, s1, s2, n_boot=10_000, seed=0, chunk=500):
     obs = float(average_precision_score(y, s1) - average_precision_score(y, s2))
     centred = diffs - diffs.mean()
     p = float((np.sum(np.abs(centred) >= abs(obs)) + 1) / (n_boot + 1))
-    return {"diff": obs, "se": float(diffs.std(ddof=1)), "p": p,
+    # bootstrap TOST: share of the bootstrap distribution at or beyond each margin (the larger one)
+    p_tost = float(max(np.sum(diffs <= -margin) + 1, np.sum(diffs >= margin) + 1) / (n_boot + 1))
+    return {"diff": obs, "se": float(diffs.std(ddof=1)), "p": p, "p_tost": p_tost,
             "ci95": (float(np.percentile(diffs, 2.5)), float(np.percentile(diffs, 97.5))),
             "ci90": (float(np.percentile(diffs, 5)), float(np.percentile(diffs, 95)))}
+
+
+def verdict2(p_diff_adj, p_tost_adj, diff, alpha=0.05):
+    """Verdict from multiplicity-adjusted difference and equivalence p-values.
+
+    Q<C / Q>C   : difference significant and equivalence not established
+    equivalent* : difference significant but also equivalent within the margin (negligible)
+    equivalent  : equivalence established, difference not significant
+    inconclusive: neither
+    """
+    sig, eq = p_diff_adj < alpha, p_tost_adj < alpha
+    if sig and eq:
+        return "equivalent*"
+    if sig:
+        return "Q>C" if diff > 0 else "Q<C"
+    return "equivalent" if eq else "inconclusive"

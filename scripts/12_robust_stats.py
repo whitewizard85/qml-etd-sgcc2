@@ -26,7 +26,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qmletd import config  # noqa: E402
-from qmletd.stats import corrected_resampled_ttest, corrected_tost, holm  # noqa: E402
+from qmletd.stats import corrected_resampled_ttest, corrected_tost, holm, verdict2  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("agg", Path(__file__).with_name("09_aggregate.py"))
 agg = importlib.util.module_from_spec(_spec)
@@ -67,28 +67,31 @@ def analyse(df, margin, ratio):
 
     # family Holm (original scheme), with naive and corrected p-values
     c["family"] = c.config + "|" + c.reference + "|" + c.M
+    c["p_tost_naive"] = agg_tost_naive(c, df, margin)
+    # Holm within each family, for the difference tests AND the equivalence tests
     for _, g in c.groupby("family"):
         c.loc[g.index, "p_naive_holm_family"] = holm(g.p_naive.to_numpy())
         c.loc[g.index, "p_corr_holm_family"] = holm(g.p_corr.to_numpy())
+        c.loc[g.index, "p_tost_naive_holm_family"] = holm(g.p_tost_naive.to_numpy())
+        c.loc[g.index, "p_tost_corr_holm_family"] = holm(g.p_tost_corr.to_numpy())
     # global Holm
     c["p_corr_holm_global"] = holm(c.p_corr.to_numpy())
+    c["p_tost_corr_holm_global"] = holm(c.p_tost_corr.to_numpy())
     # pre-specified primary family
     dmax = c.d_num.max()
     prim = (c.d_num == dmax) & ((c.M == "full") | c.config.str.startswith("qmsvm"))
     c["primary"] = prim
     c.loc[prim, "p_corr_holm_primary"] = holm(c.loc[prim, "p_corr"].to_numpy())
+    c.loc[prim, "p_tost_corr_holm_primary"] = holm(c.loc[prim, "p_tost_corr"].to_numpy())
 
-    def verdict(p_adj, p_tost, diff):
-        if p_adj < 0.05:
-            return "Q>C" if diff > 0 else "Q<C"
-        return "equivalent" if p_tost < 0.05 else "inconclusive"
-
-    c["verdict_naive_family"] = [verdict(p, t, d) for p, t, d in
-                                 zip(c.p_naive_holm_family, agg_tost_naive(c, df, margin), c.d_pr_auc)]
-    c["verdict_corr_family"] = [verdict(p, t, d) for p, t, d in
-                                zip(c.p_corr_holm_family, c.p_tost_corr, c.d_pr_auc)]
-    c["verdict_corr_global"] = [verdict(p, t, d) for p, t, d in
-                                zip(c.p_corr_holm_global, c.p_tost_corr, c.d_pr_auc)]
+    v = lambda P, T: [verdict2(p, t, d) for p, t, d in zip(c[P], c[T], c.d_pr_auc)]
+    c["verdict_naive_family"] = v("p_naive_holm_family", "p_tost_naive_holm_family")
+    c["verdict_corr_family"] = v("p_corr_holm_family", "p_tost_corr_holm_family")
+    c["verdict_corr_global"] = v("p_corr_holm_global", "p_tost_corr_holm_global")
+    c["verdict_corr_primary"] = None
+    c.loc[prim, "verdict_corr_primary"] = [verdict2(p, t, d) for p, t, d in
+                                           zip(c.loc[prim, "p_corr_holm_primary"],
+                                               c.loc[prim, "p_tost_corr_holm_primary"], c.loc[prim, "d_pr_auc"])]
     return c
 
 
@@ -106,7 +109,7 @@ def agg_tost_naive(c, df, margin):
 
 def report(c, margin, ratio, path):
     def counts(col):
-        return c[col].value_counts().reindex(["equivalent", "Q<C", "inconclusive", "Q>C"]).fillna(0).astype(int)
+        return c[col].value_counts().reindex(["equivalent", "equivalent*", "Q<C", "inconclusive", "Q>C"]).fillna(0).astype(int)
 
     lines = ["# Robustness of the matched comparisons to split dependence", "",
              f"Matched comparisons: {len(c)}. Equivalence margin: {margin} PR-AUC. "
@@ -123,7 +126,7 @@ def report(c, margin, ratio, path):
     lines.append(agg.to_markdown(ch.sort_values(["config", "M", "d_num"]), cols))
     lines += ["", "## Pre-specified primary family (largest d), corrected t, Holm within the family", ""]
     pc = ["config", "reference", "d", "M", "d_pr_auc", "ci95_lo_corr", "ci95_hi_corr",
-          "ci90_lo_corr", "ci90_hi_corr", "p_corr_holm_primary", "p_tost_corr"]
+          "ci90_lo_corr", "ci90_hi_corr", "p_corr_holm_primary", "p_tost_corr_holm_primary", "verdict_corr_primary"]
     lines.append(agg.to_markdown(c[c.primary].sort_values("config"), pc))
     path.write_text("\n".join(lines) + "\n")
 

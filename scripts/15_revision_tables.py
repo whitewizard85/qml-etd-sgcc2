@@ -20,13 +20,10 @@ NAMES = {"qk_fidelity": "Fidelity kernel", "qk_projected": "Projected kernel", "
 REF = {"rbf_matched": "RBF", "svm_bagged": "exact SVM", "svm_rbf": "SVM RBF"}
 
 
-def verdict(r, margin=0.02):
-    within = (r.ci90_lo > -margin) and (r.ci90_hi < margin)
-    if r.p_adj < 0.05:
-        if within:
-            return "equiv.$^{\\dagger}$"
-        return "worse" if r.d_pr_auc < 0 else "better"
-    return "equivalent" if within else "inconcl."
+def verdict(r):
+    lab = {"Q<C": "worse", "Q>C": "better", "equivalent": "equivalent", "equivalent*": "equiv.$^{\\dagger}$",
+           "inconclusive": "inconcl."}
+    return lab[r.verdict]
 
 
 def primary(path):
@@ -60,7 +57,8 @@ def table_shots(path, out):
         cells = []
         for S in (10000, 1000, 100):
             r = g.loc[S]
-            mark = r"$^{\mathrm{a}}$" if r.p_tost_corr < 0.05 else ""
+            p_eq = r.p_tost_corr_holm if "p_tost_corr_holm" in r.index else r.p_tost_corr
+            mark = r"$^{\mathrm{a}}$" if p_eq < 0.05 else ""
             cells.append(f"{r['diff']:+.3f}{mark}")
         lab = "global" if ro == "global" else "local mean"
         lines.append(f"{lab} & {d} & {g.pr_auc_exact.iloc[0]:.3f} & " + " & ".join(cells) + r" \\")

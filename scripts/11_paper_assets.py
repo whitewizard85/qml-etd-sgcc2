@@ -87,7 +87,8 @@ def table_matched(c, out):
         ("VQC local-mean, re-upl., MI", "vqc[local_mean_bce_re1_linear_uniform_mi]", "svm_rbf", "full"),
     ]
     # Springer style: asterisk = significant (direction given by the sign); superscript a = equivalent
-    mark = {"Q>C": r"$^{*}$", "Q<C": r"$^{*}$", "equivalent": r"$^{\mathrm{a}}$", "inconclusive": ""}
+    mark = {"Q>C": r"$^{*}$", "Q<C": r"$^{*}$", "equivalent": r"$^{\mathrm{a}}$",
+            "equivalent*": r"$^{\mathrm{a}\dagger}$", "inconclusive": ""}
     lines = [r"\begin{tabular}{llc" + "r" * len(DS) + "}", r"\toprule",
              r"Model & Control & $M$ & " + " & ".join(f"$d={d}$" for d in DS) + r" \\", r"\midrule"]
     ref_name = {"rbf_matched": "RBF", "svm_bagged": "exact SVM", "svm_rbf": "SVM RBF"}
@@ -121,18 +122,15 @@ def table_primary(r, out):
              "vqc[local_mean_bce_re0_linear_uniform_mi]": "VQC local-mean, MI",
              "vqc[local_mean_bce_re1_linear_uniform_mi]": "VQC local-mean, re-upl., MI"}
     ref_name = {"rbf_matched": "RBF", "svm_bagged": "exact SVM", "svm_rbf": "SVM RBF"}
-    lab = {"Q<C": "worse", "Q>C": "better", "equivalent": "equivalent", "inconclusive": "inconclusive"}
+    lab = {"Q<C": "worse", "Q>C": "better", "equivalent": "equivalent", "equivalent*": "equivalent$^{\\dagger}$",
+           "inconclusive": "inconclusive"}
     lines = [r"\begin{tabular}{llrcrl}", r"\toprule",
              r"Model & Control & Diff. & 95\% CI & $p$ & Verdict \\", r"\midrule"]
     r["order"] = [list(names).index(c) if c in names else 99 for c in r.config]
     for _, x in r.sort_values("order").iterrows():
         p = x.p_corr_holm_primary
         ps = "$<$0.001" if p < 0.001 else f"{p:.3f}"
-        v = "inconclusive"
-        if p < 0.05:
-            v = "Q<C" if x.d_pr_auc < 0 else "Q>C"
-        elif x.p_tost_corr < 0.05:
-            v = "equivalent"
+        v = x.verdict_corr_primary
         lines.append(f"{names.get(x.config, x.config)} & {ref_name[x.reference]} & {x.d_pr_auc:+.3f} & "
                      f"[{x.ci95_lo_corr:+.3f}, {x.ci95_hi_corr:+.3f}] & {ps} & {lab[v]} \\\\")
     lines += [r"\bottomrule", r"\end{tabular}"]

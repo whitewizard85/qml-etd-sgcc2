@@ -29,7 +29,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qmletd import config, data, metrics, prep  # noqa: E402
-from qmletd.stats import bootstrap_diff_fast, delong, holm, verdict  # noqa: E402
+from qmletd.stats import bootstrap_diff_fast, delong, holm, verdict2  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("agg", Path(__file__).with_name("09_aggregate.py"))
 agg = importlib.util.module_from_spec(_spec)
@@ -119,12 +119,12 @@ def main(margin, n_boot, require_folds):
         q, c = cache[kq], cache[kr]
         if not np.array_equal(q["y_test"], c["y_test"]):
             raise RuntimeError(f"unpaired test sets: {kq} vs {kr}")
-        b = bootstrap_diff_fast(q["y_test"], q["s_test"], c["s_test"], n_boot=n_boot, seed=0)
+        b = bootstrap_diff_fast(q["y_test"], q["s_test"], c["s_test"], n_boot=n_boot, seed=0, margin=margin)
         auc_q, auc_c, _, p_dl = delong(q["y_test"], q["s_test"], c["s_test"])
         rows.append({"experiment": exp, "config": cfg, "d": d, "M": M, "reference": ref,
                      "pr_auc_q": q["metrics"]["pr_auc"], "pr_auc_ref": c["metrics"]["pr_auc"],
                      "d_pr_auc": b["diff"], "ci95_lo": b["ci95"][0], "ci95_hi": b["ci95"][1],
-                     "ci90_lo": b["ci90"][0], "ci90_hi": b["ci90"][1], "p_boot": b["p"],
+                     "ci90_lo": b["ci90"][0], "ci90_hi": b["ci90"][1], "p_boot": b["p"], "p_tost": b["p_tost"],
                      "d_roc_auc": auc_q - auc_c, "p_delong": p_dl,
                      "d_precision_at_5pct": q["metrics"]["precision_at_5pct"]
                      - c["metrics"]["precision_at_5pct"]})
@@ -139,13 +139,13 @@ def main(margin, n_boot, require_folds):
     c["d_num"] = pd.to_numeric(c.d, errors="coerce")
     dmax = c.d_num.max()
     c["primary"] = (c.d_num == dmax) & ((c.M.astype(str) == "full") | c.config.str.startswith("qmsvm"))
-    c.loc[c.primary, "p_holm_primary"] = holm(c.loc[c.primary, "p_boot"].to_numpy())
     sec = ~c.primary
-    if sec.any():
-        c.loc[sec, "p_holm_secondary"] = holm(c.loc[sec, "p_boot"].to_numpy())
-    c["p_adj"] = c.p_holm_primary.fillna(c.get("p_holm_secondary"))
-    c["verdict"] = [verdict(p, d_, (lo, hi), margin)
-                    for p, d_, lo, hi in zip(c.p_adj, c.d_pr_auc, c.ci90_lo, c.ci90_hi)]
+    for col in ("p_boot", "p_tost"):           # Holm within the primary family and within the secondary set
+        c.loc[c.primary, f"{col}_holm"] = holm(c.loc[c.primary, col].to_numpy())
+        if sec.any():
+            c.loc[sec, f"{col}_holm"] = holm(c.loc[sec, col].to_numpy())
+    c["p_adj"] = c.p_boot_holm
+    c["verdict"] = [verdict2(p, t, d_) for p, t, d_ in zip(c.p_boot_holm, c.p_tost_holm, c.d_pr_auc)]
     c.drop(columns=["d_num"]).to_csv(OUT / "holdout_comparisons.csv", index=False)
 
     n_te = len(next(iter(cache.values()))["y_test"])
@@ -156,7 +156,7 @@ def main(margin, n_boot, require_folds):
              f"Equivalence margin: {margin} PR-AUC.", "",
              "## Primary family (pre-specified), Holm-adjusted", ""]
     cols = ["config", "reference", "d", "M", "pr_auc_q", "pr_auc_ref", "d_pr_auc", "ci95_lo",
-            "ci95_hi", "ci90_lo", "ci90_hi", "p_adj", "verdict", "d_precision_at_5pct"]
+            "ci95_hi", "ci90_lo", "ci90_hi", "p_adj", "p_tost_holm", "verdict", "d_precision_at_5pct"]
     lines.append(agg.to_markdown(c[c.primary].sort_values("config"), cols))
     lines += ["", "## Secondary comparisons (Holm over all secondary comparisons)", ""]
     lines.append(agg.to_markdown(c[~c.primary].sort_values(["config", "M", "d"]), cols))

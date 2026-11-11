@@ -16,7 +16,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qmletd import config  # noqa: E402
-from qmletd.stats import corrected_resampled_ttest, corrected_tost, mean_ci  # noqa: E402
+from qmletd.stats import corrected_resampled_ttest, corrected_tost, holm, mean_ci, verdict2  # noqa: E402
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
@@ -44,6 +44,10 @@ if __name__ == "__main__":
                         "ci95_naive_lo": lo, "ci95_naive_hi": hi, "ci95_corr_lo": ci[0],
                         "ci95_corr_hi": ci[1], "p_corr": p, "p_tost_corr": pt})
     o = pd.DataFrame(out).sort_values(["readout", "d", "shots"], ascending=[True, True, False])
+    # Holm over all (readout, d, shots) cells, for the difference and the equivalence tests
+    o["p_corr_holm"] = holm(o.p_corr.to_numpy())
+    o["p_tost_corr_holm"] = holm(o.p_tost_corr.to_numpy())
+    o["verdict"] = [verdict2(p, t, d) for p, t, d in zip(o.p_corr_holm, o.p_tost_corr_holm, o["diff"])]
     dst = config.RESULTS / "summary"
     dst.mkdir(parents=True, exist_ok=True)
     o.to_csv(dst / "shots_stats.csv", index=False)
