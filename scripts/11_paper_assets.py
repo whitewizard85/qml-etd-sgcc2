@@ -107,6 +107,38 @@ def table_matched(c, out):
     (out / "tab_matched.tex").write_text("\n".join(lines) + "\n")
 
 
+def table_primary(r, out):
+    """Pre-specified primary family (largest d), corrected resampled t-test (12_robust_stats.py)."""
+    r = prefer_tag(r[r.primary.astype(str) == "True"].copy(), "config")
+    names = {"qk_fidelity": "Fidelity kernel", "qk_projected": "Projected kernel",
+             "qmsvm[S20_m80]": "QUBO-SVM (SA)",
+             "vqc[global_bce_re0_linear_uniform]": "VQC global",
+             "vqc[global_bce_re1_linear_uniform]": "VQC global, re-upl.",
+             "vqc[local_bce_re0_linear_uniform]": "VQC local",
+             "vqc[local_bce_re1_linear_uniform]": "VQC local, re-upl.",
+             "vqc[local_bce_re0_linear_uniform_mi]": "VQC local, MI",
+             "vqc[local_bce_re1_linear_uniform_mi]": "VQC local, re-upl., MI",
+             "vqc[local_mean_bce_re0_linear_uniform_mi]": "VQC local-mean, MI",
+             "vqc[local_mean_bce_re1_linear_uniform_mi]": "VQC local-mean, re-upl., MI"}
+    ref_name = {"rbf_matched": "RBF", "svm_bagged": "exact SVM", "svm_rbf": "SVM RBF"}
+    lab = {"Q<C": "worse", "Q>C": "better", "equivalent": "equivalent", "inconclusive": "inconclusive"}
+    lines = [r"\begin{tabular}{llrcrl}", r"\toprule",
+             r"Model & Control & Diff. & 95\% CI & $p$ & Verdict \\", r"\midrule"]
+    r["order"] = [list(names).index(c) if c in names else 99 for c in r.config]
+    for _, x in r.sort_values("order").iterrows():
+        p = x.p_corr_holm_primary
+        ps = "$<$0.001" if p < 0.001 else f"{p:.3f}"
+        v = "inconclusive"
+        if p < 0.05:
+            v = "Q<C" if x.d_pr_auc < 0 else "Q>C"
+        elif x.p_tost_corr < 0.05:
+            v = "equivalent"
+        lines.append(f"{names.get(x.config, x.config)} & {ref_name[x.reference]} & {x.d_pr_auc:+.3f} & "
+                     f"[{x.ci95_lo_corr:+.3f}, {x.ci95_hi_corr:+.3f}] & {ps} & {lab[v]} \\\\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    (out / "tab_primary.tex").write_text("\n".join(lines) + "\n")
+
+
 def table_gradvar(gf, out):
     lab = {"local": "local $\\langle Z_0\\rangle$", "local_mean": "local mean $\\frac1d\\sum_q\\langle Z_q\\rangle$",
            "global": "global $\\langle Z^{\\otimes d}\\rangle$"}
@@ -207,6 +239,7 @@ if __name__ == "__main__":
         # verdicts from the Nadeau-Bengio corrected tests (scripts/12_robust_stats.py)
         comp = pd.read_csv(S / "robust_comparisons.csv", dtype={"M": str, "d": str})
         comp["verdict"] = comp["verdict_corr_family"]
+        table_primary(comp.copy(), O / "tables")
         print("[assets] matched table: corrected resampled t-test verdicts")
     runs = pd.read_csv(S / "all_runs.csv", dtype={"d": str, "M": str}, low_memory=False)
     table_main(summ, O / "tables")
