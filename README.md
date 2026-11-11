@@ -51,6 +51,9 @@ Source: <https://github.com/henryRDlab/ElectricityTheftDetection>. The CSV is di
 > doi:10.1109/TII.2017.2785963
 Date columns are sorted chronologically before interpolation (in the public CSV they are not guaranteed to be ordered).
 
+Per-run outputs of the paper (metrics, selected hyperparameters, test-set scores):
+<https://doi.org/10.5281/zenodo.24109562>.
+
 ## Reproducing the paper
 
 ```bash
