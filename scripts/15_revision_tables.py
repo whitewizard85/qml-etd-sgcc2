@@ -49,7 +49,7 @@ def table_holdout(sgcc, tdd, out):
             continue
         x, y = a.loc[k], b.loc[k]
         left = f"{x.d_pr_auc:+.3f} [{x.ci95_lo:+.3f}, {x.ci95_hi:+.3f}] & {verdict(x)}"
-        right = f"{y.d_pr_auc:+.3f} [{y.ci95_lo:+.3f}, {y.ci95_hi:+.3f}]"
+        right = f"{y.d_pr_auc:+.3f}"
         if bt is not None:
             g = bt[bt.key == k]
             right += f" & {int((g['diff'] < 0).sum())}/{len(g)} & [{g['diff'].min():+.3f}, {g['diff'].max():+.3f}]"
