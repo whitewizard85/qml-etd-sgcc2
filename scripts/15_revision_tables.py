@@ -42,7 +42,7 @@ def table_holdout(sgcc, tdd, out):
         bt["key"] = bt.config.str.replace(r"\[bwext2\]", "", regex=True)
     lines = [r"\begin{tabular}{lrlrcr}", r"\toprule",
              r" & \multicolumn{2}{c}{SGCC} & \multicolumn{3}{c}{TDD2022 (descriptive)} \\",
-             r"Model & $\Delta$ [95\% CI] & Verdict & $\Delta$ [95\% CI, days] & $\Delta<0$ & per-type range \\",
+             r"Model & $\Delta$ [95\% CI] & Verdict & $\Delta$ & $\Delta<0$ & range over types \\",
              r"\midrule"]
     for k, name in NAMES.items():
         if k not in a.index or k not in b.index:
