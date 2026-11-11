@@ -38,15 +38,15 @@ def primary(path):
 
 def table_holdout(sgcc, tdd, out):
     a, b = primary(sgcc), primary(tdd)
-    lines = [r"\begin{tabular}{llrlrl}", r"\toprule",
-             r" & & \multicolumn{2}{c}{SGCC} & \multicolumn{2}{c}{TDD2022} \\",
-             r"Model & Control & $\Delta$ [95\% CI] & Verdict & $\Delta$ [95\% CI] & Verdict \\", r"\midrule"]
+    lines = [r"\begin{tabular}{lrlrl}", r"\toprule",
+             r" & \multicolumn{2}{c}{SGCC} & \multicolumn{2}{c}{TDD2022} \\",
+             r"Model & $\Delta$ [95\% CI] & Verdict & $\Delta$ [95\% CI] & Verdict \\", r"\midrule"]
     for k, name in NAMES.items():
         if k not in a.index or k not in b.index:
             continue
         x, y = a.loc[k], b.loc[k]
         cell = lambda r: f"{r.d_pr_auc:+.3f} [{r.ci95_lo:+.3f}, {r.ci95_hi:+.3f}] & {verdict(r)}"
-        lines.append(f"{name} & {REF[x.reference]} & {cell(x)} & {cell(y)} \\\\")
+        lines.append(f"{name} & {cell(x)} & {cell(y)} \\\\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     (out / "tab_holdout.tex").write_text("\n".join(lines) + "\n")
 
