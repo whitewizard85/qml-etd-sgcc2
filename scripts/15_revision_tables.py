@@ -34,16 +34,28 @@ def primary(path):
 
 
 def table_holdout(sgcc, tdd, out):
+    """SGCC: bootstrap CI and verdict. TDD2022: day-level CI (descriptive) and per-held-out-type differences."""
     a, b = primary(sgcc), primary(tdd)
-    lines = [r"\begin{tabular}{lrlrl}", r"\toprule",
-             r" & \multicolumn{2}{c}{SGCC} & \multicolumn{2}{c}{TDD2022} \\",
-             r"Model & $\Delta$ [95\% CI] & Verdict & $\Delta$ [95\% CI] & Verdict \\", r"\midrule"]
+    bt_path = Path(tdd) / "tdd_by_type.csv"
+    bt = pd.read_csv(bt_path) if bt_path.exists() else None
+    if bt is not None:
+        bt["key"] = bt.config.str.replace(r"\[bwext2\]", "", regex=True)
+    lines = [r"\begin{tabular}{lrlrcr}", r"\toprule",
+             r" & \multicolumn{2}{c}{SGCC} & \multicolumn{3}{c}{TDD2022 (descriptive)} \\",
+             r"Model & $\Delta$ [95\% CI] & Verdict & $\Delta$ [95\% CI, days] & $\Delta<0$ & per-type range \\",
+             r"\midrule"]
     for k, name in NAMES.items():
         if k not in a.index or k not in b.index:
             continue
         x, y = a.loc[k], b.loc[k]
-        cell = lambda r: f"{r.d_pr_auc:+.3f} [{r.ci95_lo:+.3f}, {r.ci95_hi:+.3f}] & {verdict(r)}"
-        lines.append(f"{name} & {cell(x)} & {cell(y)} \\\\")
+        left = f"{x.d_pr_auc:+.3f} [{x.ci95_lo:+.3f}, {x.ci95_hi:+.3f}] & {verdict(x)}"
+        right = f"{y.d_pr_auc:+.3f} [{y.ci95_lo:+.3f}, {y.ci95_hi:+.3f}]"
+        if bt is not None:
+            g = bt[bt.key == k]
+            right += f" & {int((g['diff'] < 0).sum())}/{len(g)} & [{g['diff'].min():+.3f}, {g['diff'].max():+.3f}]"
+        else:
+            right += " & -- & --"
+        lines.append(f"{name} & {left} & {right} \\\\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     (out / "tab_holdout.tex").write_text("\n".join(lines) + "\n")
 
