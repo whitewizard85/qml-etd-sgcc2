@@ -203,6 +203,11 @@ if __name__ == "__main__":
     (O / "figures").mkdir(parents=True, exist_ok=True)
     summ = pd.read_csv(S / "summary.csv", dtype={"d": str, "M": str})
     comp = pd.read_csv(S / "comparisons.csv", dtype={"M": str})
+    if (S / "robust_comparisons.csv").exists():
+        # verdicts from the Nadeau-Bengio corrected tests (scripts/12_robust_stats.py)
+        comp = pd.read_csv(S / "robust_comparisons.csv", dtype={"M": str, "d": str})
+        comp["verdict"] = comp["verdict_corr_family"]
+        print("[assets] matched table: corrected resampled t-test verdicts")
     runs = pd.read_csv(S / "all_runs.csv", dtype={"d": str, "M": str}, low_memory=False)
     table_main(summ, O / "tables")
     table_matched(comp, O / "tables")
