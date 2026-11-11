@@ -17,7 +17,6 @@ cd "$(dirname "$0")"
 DEVICE="${DEVICE:-cuda}"
 STEPS="${STEPS:-robust shots sgcc_hold tdd_prep tdd_hold eval}"
 D="2 4 6 8 10 13"; M="150 1040 full"; FOLDS="0 1 2 3 4"
-has() { [[ " $STEPS " == *" $1 "* ]]; }
 ts() { date "+%F %T"; }
 py() { echo "[$(ts)] ${QMLETD_DATASET:-sgcc}/${QMLETD_PROTOCOL:-splits}: python $*"; python -u "$@"; }
 
@@ -34,27 +33,17 @@ campaign() {
   py scripts/04_qmsvm.py --splits $FOLDS --d $D
 }
 
-if has robust; then
-  py scripts/09_aggregate.py --figs-only
-  py scripts/12_robust_stats.py
-fi
-if has shots; then
-  py scripts/10_vqc_shots.py --d 4 8 10 13 --readouts global local_mean --shots exact 10000 1000 100 \
-     --splits 0 1 2 3 4 5 6 7 8 9 --device "$DEVICE"
-  py scripts/14_shots_stats.py
-fi
-if has sgcc_hold; then
-  ( export QMLETD_DATASET=sgcc QMLETD_PROTOCOL=holdout; campaign )
-fi
-if has tdd_prep; then
-  ( export QMLETD_DATASET=tdd2022; py scripts/00b_prepare_tdd2022.py --day-label any )
-fi
-if has tdd_hold; then
-  ( export QMLETD_DATASET=tdd2022 QMLETD_PROTOCOL=holdout; campaign )
-fi
-if has eval; then
+step_robust()    { py scripts/09_aggregate.py --figs-only; py scripts/12_robust_stats.py; }
+step_shots()     { py scripts/10_vqc_shots.py --d 4 8 10 13 --readouts global local_mean --shots exact 10000 1000 100 \
+                     --splits 0 1 2 3 4 5 6 7 8 9 --device "$DEVICE"; py scripts/14_shots_stats.py; }
+step_sgcc_hold() { ( export QMLETD_DATASET=sgcc QMLETD_PROTOCOL=holdout; campaign ); }
+step_tdd_prep()  { ( export QMLETD_DATASET=tdd2022; py scripts/00b_prepare_tdd2022.py --day-label any ); }
+step_tdd_hold()  { ( export QMLETD_DATASET=tdd2022 QMLETD_PROTOCOL=holdout; campaign ); }
+step_eval() {
   ( export QMLETD_DATASET=sgcc QMLETD_PROTOCOL=holdout; py scripts/13_holdout_eval.py --boot 10000 )
   ( export QMLETD_DATASET=tdd2022 QMLETD_PROTOCOL=holdout; py scripts/13_holdout_eval.py --boot 10000 )
-fi
+}
+# steps run in the order given in STEPS
+for st in $STEPS; do "step_$st"; done
 echo "[$(ts)] done. Reports: results/summary/robust_report.md, results/summary/shots_stats.md,"
 echo "          results_sgcc_holdout/summary/holdout_report.md, results_tdd2022_holdout/summary/holdout_report.md"
